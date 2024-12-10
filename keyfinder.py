@@ -4,94 +4,70 @@ import IPython.display as ipd
 import librosa
 import librosa.display
 
-# class that uses the librosa library to analyze the key that an mp3 is in
-# arguments:
-#     waveform: an mp3 file loaded by librosa, ideally separated out from any percussive sources
-#     sr: sampling rate of the mp3, which can be obtained when the file is read with librosa
-#     tstart and tend: the range in seconds of the file to be analyzed; default to the beginning and end of file if not specified
-class Tonal_Fragment(object):
-    def __init__(self, waveform, sr, tstart=None, tend=None):
-        self.waveform = waveform
-        self.sr = sr
-        self.tstart = tstart
-        self.tend = tend
-        
-        if self.tstart is not None:
-            self.tstart = librosa.time_to_samples(self.tstart, sr=self.sr)
-        if self.tend is not None:
-            self.tend = librosa.time_to_samples(self.tend, sr=self.sr)
-        self.y_segment = self.waveform[self.tstart:self.tend]
-        self.chromograph = librosa.feature.chroma_cqt(y=self.y_segment, sr=self.sr, bins_per_octave=24)
-        
-        # chroma_vals is the amount of each pitch class present in this time interval
-        self.chroma_vals = []
-        for i in range(12):
-            self.chroma_vals.append(np.sum(self.chromograph[i]))
-        pitches = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
-        # dictionary relating pitch names to the associated intensity in the song
-        self.keyfreqs = {pitches[i]: self.chroma_vals[i] for i in range(12)} 
-        
-        keys = [pitches[i] + ' major' for i in range(12)] + [pitches[i] + ' minor' for i in range(12)]
+# Define complete key profiles for all major and minor keys
+KEY_PROFILES_MAJOR = {
+    'C':  [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
+    'C#': [2.88, 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29],
+    'D':  [2.29, 2.88, 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66],
+    'D#': [3.66, 2.29, 2.88, 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39],
+    'E':  [2.39, 3.66, 2.29, 2.88, 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19],
+    'F':  [5.19, 2.39, 3.66, 2.29, 2.88, 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52],
+    'F#': [2.52, 5.19, 2.39, 3.66, 2.29, 2.88, 6.35, 2.23, 3.48, 2.33, 4.38, 4.09],
+    'G':  [4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88, 6.35, 2.23, 3.48, 2.33, 4.38],
+    'G#': [4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88, 6.35, 2.23, 3.48, 2.33],
+    'A':  [2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88, 6.35, 2.23, 3.48],
+    'A#': [3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88, 6.35, 2.23],
+    'B':  [2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88, 6.35]
+}
 
-        # use of the Krumhansl-Schmuckler key-finding algorithm, which compares the chroma
-        # data above to typical profiles of major and minor keys:
-        maj_profile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
-        min_profile = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+KEY_PROFILES_MINOR = {
+    'C':  [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.42, 3.29],
+    'C#': [3.29, 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.42],
+    'D':  [3.42, 3.29, 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69],
+    'D#': [2.69, 3.42, 3.29, 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98],
+    'E':  [3.98, 2.69, 3.42, 3.29, 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75],
+    'F':  [4.75, 3.98, 2.69, 3.42, 3.29, 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54],
+    'F#': [2.54, 4.75, 3.98, 2.69, 3.42, 3.29, 6.33, 2.68, 3.52, 5.38, 2.60, 3.53],
+    'G':  [3.53, 2.54, 4.75, 3.98, 2.69, 3.42, 3.29, 6.33, 2.68, 3.52, 5.38, 2.60],
+    'G#': [2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.42, 3.29, 6.33, 2.68, 3.52, 5.38],
+    'A':  [5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.42, 3.29, 6.33, 2.68, 3.52],
+    'A#': [3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.42, 3.29, 6.33, 2.68],
+    'B':  [2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.42, 3.29, 6.33]
+}
 
-        # finds correlations between the amount of each pitch class in the time interval and the above profiles,
-        # starting on each of the 12 pitches. then creates dict of the musical keys (major/minor) to the correlation
-        self.min_key_corrs = []
-        self.maj_key_corrs = []
-        for i in range(12):
-            key_test = [self.keyfreqs.get(pitches[(i + m)%12]) for m in range(12)]
-            # correlation coefficients (strengths of correlation for each key)
-            self.maj_key_corrs.append(round(np.corrcoef(maj_profile, key_test)[1,0], 3))
-            self.min_key_corrs.append(round(np.corrcoef(min_profile, key_test)[1,0], 3))
+def detect_key_librosa(audio_file):
+    """
+    Detect the musical key of an audio file using Librosa.
+    Returns only the key name to maintain compatibility with existing keymaster.py
+    """
+    try:
+        # Load the audio file
+        y, sr = librosa.load(audio_file)
 
-        # names of all major and minor keys
-        self.key_dict = {**{keys[i]: self.maj_key_corrs[i] for i in range(12)}, 
-                         **{keys[i+12]: self.min_key_corrs[i] for i in range(12)}}
-        
-        # this attribute represents the key determined by the algorithm
-        self.key = max(self.key_dict, key=self.key_dict.get)
-        self.bestcorr = max(self.key_dict.values())
-        
-        # this attribute represents the second-best key determined by the algorithm,
-        # if the correlation is close to that of the actual key determined
-        self.altkey = None
-        self.altbestcorr = None
+        # Compute the chroma feature
+        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
 
-        for key, corr in self.key_dict.items():
-            if corr > self.bestcorr*0.9 and corr != self.bestcorr:
-                self.altkey = key
-                self.altbestcorr = corr
-                
-    # prints the relative prominence of each pitch class            
-    def print_chroma(self):
-        self.chroma_max = max(self.chroma_vals)
-        for key, chrom in self.keyfreqs.items():
-            print(key, '\t', f'{chrom/self.chroma_max:5.3f}')
-                
-    # prints the correlation coefficients associated with each major/minor key
-    def corr_table(self):
-        for key, corr in self.key_dict.items():
-            print(key, '\t', f'{corr:6.3f}')
-    
-    # printout of the key determined by the algorithm; if another key is close, that key is mentioned
-    def print_key(self):
-        print("likely key: ", max(self.key_dict, key=self.key_dict.get), ", correlation: ", self.bestcorr, sep='')
-        if self.altkey is not None:
-                print("also possible: ", self.altkey, ", correlation: ", self.altbestcorr, sep='')
-    
-    # prints a chromagram of the file, showing the intensity of each pitch class over time
-    def chromagram(self, title=None):
-        C = librosa.feature.chroma_cqt(y=self.waveform, sr=sr, bins_per_octave=24)
-        plt.figure(figsize=(12,4))
-        librosa.display.specshow(C, sr=sr, x_axis='time', y_axis='chroma', vmin=0, vmax=1)
-        if title is None:
-            plt.title('Chromagram')
-        else:
-            plt.title(title)
-        plt.colorbar()
-        plt.tight_layout()
-        plt.show()
+        # Calculate the average energy for each pitch class
+        pitch_class_energy = np.mean(chroma, axis=1)
+
+        # Compare with all key profiles
+        correlations = {}
+
+        # Check major keys
+        for key, profile in KEY_PROFILES_MAJOR.items():
+            correlation = np.corrcoef(pitch_class_energy, profile)[0, 1]
+            correlations[f"{key}"] = correlation
+
+        # Check minor keys
+        for key, profile in KEY_PROFILES_MINOR.items():
+            correlation = np.corrcoef(pitch_class_energy, profile)[0, 1]
+            correlations[f"{key}m"] = correlation
+
+        # Find the key with the highest correlation
+        detected_key = max(correlations.items(), key=lambda x: x[1])[0]
+
+        return detected_key
+
+    except Exception as e:
+        print(f"Error detecting key: {e}")
+        return None
